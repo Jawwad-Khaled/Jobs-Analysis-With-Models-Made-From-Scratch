@@ -102,16 +102,16 @@ class Regression_Tree():
         if len(y) == 0:
             return None, None, False
         initial_sse = np.sum((np.mean(y) - y)**2)
-        for i in self.features:
-            sorted_array = np.unique(X[:, i])
+        for feature in self.features:
+            sorted_array = np.unique(X[:, feature])
             if len(sorted_array) <= 1:
                 continue
             midpoints = 0.5 * (sorted_array[1:] + sorted_array[:-1])
             sse_values = {}
             for midpoint in midpoints:
                 sse = 0
-                left_mask = np.argwhere(X[:, i] <= midpoint).flatten()
-                right_mask = np.argwhere(X[:, i] > midpoint).flatten()
+                left_mask = np.argwhere(X[:, feature] <= midpoint).flatten()
+                right_mask = np.argwhere(X[:, feature] > midpoint).flatten()
                 if len(left_mask) == 0 or len(right_mask) == 0:
                     continue
                 left_mean = np.mean(y[left_mask])
@@ -123,7 +123,7 @@ class Regression_Tree():
                 continue
             best_midpoint = min(sse_values, key=sse_values.get)
             best_sse = sse_values[best_midpoint]
-            choices.append([i, best_midpoint, best_sse])
+            choices.append([feature, best_midpoint, best_sse])
         if not choices:
             return None, None, False
         best_predictor = 0
@@ -177,11 +177,30 @@ class Regression_Tree():
         else:
             return self.traverse_tree(x, node.right)
 
-    def features_importance(self):
+    def feature_importances(self):
         return self.sse_decreases / np.sum(self.sse_decreases)
 
     def direction_of_change(self):
         return self.sum_of_changes
+
+    def permutation_importances(self, X, y):
+        predictions_full = self.predict(X)
+        rmse_full = np.sqrt(np.mean((y - predictions_full)**2))
+        permutation_importances = []
+        for feature in range(0, X.shape[1]):
+            feature_rmse_increase = []
+            for i in range(0, 10):
+                X_ = X.copy()
+                np.random.shuffle(X_[:, feature])
+                predictions = self.predict(X_)
+                rmse = np.sqrt(np.mean((y - predictions)**2))
+                rmse_increase = rmse - rmse_full
+                feature_rmse_increase.append(rmse_increase)
+            permutation_importances.append(np.mean(feature_rmse_increase))
+        permutation_importances = np.array(permutation_importances)
+        permutation_importances = np.where(permutation_importances > 0, permutation_importances, 0)
+        permutation_importances = permutation_importances / (np.sum(permutation_importances) + 1e-8)
+        return permutation_importances
 
 class Classification_Tree():
     def __init__(self, number_of_random_features, minimum_samples_split=100, max_depth=100):
@@ -189,7 +208,7 @@ class Classification_Tree():
         self.max_depth = max_depth
         self.features = np.array([])
         self.number_of_random_features = number_of_random_features
-        self.sse_decreases = np.array([])
+        self.impurity_decreases = np.array([])
         self.sum_of_changes = np.array([])
         self.root = None
         self.total_count = 0
@@ -200,15 +219,15 @@ class Classification_Tree():
         if len(y) == 0:
             return None, None, False
         initial_impurity = 1 - (np.sum(y == 0) / len(y)) ** 2 - (np.sum(y == 1) / len(y)) ** 2
-        for i in self.features:
-            sorted_array = np.unique(X[:, i])
+        for feature in self.features:
+            sorted_array = np.unique(X[:, feature])
             if len(sorted_array) <= 1:
                 continue
             midpoints = 0.5 * (sorted_array[1:] + sorted_array[:-1])
             gini_impurities = {}
             for midpoint in midpoints:
                 impurity = 0
-                left_mask = X[:, i] <= midpoint
+                left_mask = X[:, feature] <= midpoint
                 right_mask = ~left_mask
                 if len(left_mask) == 0 or len(right_mask) == 0:
                     continue
@@ -222,7 +241,7 @@ class Classification_Tree():
                 continue
             best_midpoint = min(gini_impurities, key=gini_impurities.get)
             best_impurity = gini_impurities[best_midpoint]
-            choices.append([i, best_midpoint, best_impurity])
+            choices.append([feature, best_midpoint, best_impurity])
         if not choices:
             return None, None, False
         best_predictor = 0
@@ -235,12 +254,12 @@ class Classification_Tree():
                 best_midpoint = choice[1]
         left_mask = X[:, best_predictor] <= best_midpoint
         right_mask = ~left_mask
-        self.sse_decreases[best_predictor] += initial_impurity - best_impurity
+        self.impurity_decreases[best_predictor] += initial_impurity - best_impurity
         self.sum_of_changes[best_predictor] += len(y) / self.total_count * (np.mean(y[right_mask]) - np.mean(y[left_mask]))
         return best_predictor, best_midpoint, True
     
     def fit(self, X, y):
-        self.sse_decreases = np.zeros((X.shape[1]))
+        self.impurity_decreases = np.zeros((X.shape[1]))
         self.sum_of_changes = np.zeros((X.shape[1]))
         self.total_count = len(y)
         self.features = X.shape[1]
@@ -274,11 +293,30 @@ class Classification_Tree():
         else:
             return self.traverse_tree(x, node.right)
 
-    def features_importance(self):
-        return self.sse_decreases / np.sum(self.sse_decreases)
+    def feature_importances(self):
+        return self.impurity_decreases / np.sum(self.impurity_decreases)
 
     def direction_of_change(self):
         return self.sum_of_changes
+
+    def permutation_importances(self, X, y):
+        predictions_full = self.predict(X)
+        accuracy_full = np.sum(y == predictions_full) / len(y)
+        permutation_importances = []
+        for feature in range(0, X.shape[1]):
+            feature_accuracy_increase = []
+            for i in range(0, 10):
+                X_ = X.copy()
+                np.random.shuffle(X_[:, feature])
+                predictions = self.predict(X_)
+                accuracy = np.sum(y == predictions) / len(y)
+                accuracy_decrease = accuracy_full - accuracy
+                feature_accuracy_increase.append(accuracy_decrease)
+            permutation_importances.append(np.mean(feature_accuracy_increase))
+        permutation_importances = np.array(permutation_importances)
+        permutation_importances = np.where(permutation_importances > 0, permutation_importances, 0)
+        permutation_importances = permutation_importances / (np.sum(permutation_importances) + 1e-8)
+        return permutation_importances
 
 class Regression_Random_Forest():
     def __init__(self, number_of_trees=100, number_of_random_features=1, max_depth=100, minimum_samples_split=20):
@@ -287,8 +325,6 @@ class Regression_Random_Forest():
         self.max_depth = max_depth
         self.minimum_samples_split = minimum_samples_split
         self.trees = []
-        self.features_importance_ = np.array([])
-        self.direction_of_change_ = np.array([])
 
     def fit(self, X, y):
         for i in range(0, self.number_of_trees):
@@ -296,19 +332,11 @@ class Regression_Random_Forest():
             regression_tree = Regression_Tree(max_depth=self.max_depth, minimum_samples_split=self.minimum_samples_split, number_of_random_features=self.number_of_random_features)
             regression_tree.fit(X[indices], y[indices])
             self.trees.append(regression_tree)
-            if len(self.features_importance_) == 0:
-                self.features_importance_ = regression_tree.features_importance().reshape(-1, 1).copy()
-            else:
-                self.features_importance_ = np.hstack((self.features_importance_, regression_tree.features_importance().reshape(-1, 1).copy()))
-            if len(self.direction_of_change_) == 0:
-                self.direction_of_change_ = regression_tree.direction_of_change().reshape(-1, 1).copy()
-            else:
-                self.direction_of_change_ = np.hstack((self.direction_of_change_, regression_tree.direction_of_change().reshape(-1, 1).copy()))
             
     def select_samples(self, X, y):
         return np.random.choice(y.shape[0], y.shape[0], True)
     
-    def predict(self, X):
+    def predict(self, X, y=None):
         predictions = []
         for tree in self.trees:
             prediction = tree.predict(X)
@@ -316,11 +344,17 @@ class Regression_Random_Forest():
         predictions = np.array(predictions)
         return np.mean(predictions, axis=0)
 
-    def features_importance(self):
-        return np.mean(self.features_importance_, axis=1)
+    def feature_importances(self):
+        feature_importances = np.column_stack([tree.feature_importances() for tree in self.trees])
+        return np.mean(feature_importances, axis=1)
 
     def direction_of_change(self):
-        return np.mean(self.direction_of_change_, axis=1)
+        direction_of_change = np.column_stack([tree.direction_of_change() for tree in self.trees])
+        return np.mean(direction_of_change, axis=1)
+
+    def permutation_importances(self, X, y):
+        permutation_importances = np.column_stack([tree.permutation_importances(X, y) for tree in self.trees])
+        return np.mean(permutation_importances, axis=1)
 
 class Classification_Random_Forest():
     def __init__(self, number_of_trees=100, number_of_random_features=1, max_depth=100, minimum_samples_split=20):
@@ -329,8 +363,6 @@ class Classification_Random_Forest():
             self.max_depth = max_depth
             self.minimum_samples_split = minimum_samples_split
             self.trees = []
-            self.features_importance_ = np.array([])
-            self.direction_of_change_ = np.array([])
 
     def fit(self, X, y):
         for i in range(0, self.number_of_trees):
@@ -338,19 +370,11 @@ class Classification_Random_Forest():
             classification_tree = Classification_Tree(max_depth=self.max_depth, minimum_samples_split=self.minimum_samples_split, number_of_random_features=self.number_of_random_features)
             classification_tree.fit(X[indices], y[indices])
             self.trees.append(classification_tree)
-            if len(self.features_importance_) == 0:
-                self.features_importance_ = classification_tree.features_importance().reshape(-1, 1).copy()
-            else:
-                self.features_importance_ = np.hstack((self.features_importance_, classification_tree.features_importance().reshape(-1, 1).copy()))
-            if len(self.direction_of_change_) == 0:
-                self.direction_of_change_ = classification_tree.direction_of_change().reshape(-1, 1).copy()
-            else:
-                self.direction_of_change_ = np.hstack((self.direction_of_change_, classification_tree.direction_of_change().reshape(-1, 1).copy()))
 
     def select_samples(self, X, y):
         return np.random.choice(y.shape[0], y.shape[0], True)
     
-    def predict(self, X):
+    def predict(self, X, y=None):
         predictions = []
         for tree in self.trees:
             prediction = tree.predict(X)
@@ -358,11 +382,17 @@ class Classification_Random_Forest():
         predictions = np.array(predictions)
         return  np.mean(predictions, axis=0)
 
-    def features_importance(self):
-        return np.mean(self.features_importance_, axis=1)
+    def feature_importances(self):
+        feature_importances = np.column_stack([tree.feature_importances() for tree in self.trees])
+        return np.mean(feature_importances, axis=1)
 
     def direction_of_change(self):
-        return np.mean(self.direction_of_change_, axis=1)
+        direction_of_change = np.column_stack([tree.direction_of_change() for tree in self.trees])
+        return np.mean(direction_of_change, axis=1)
+
+    def permutation_importances(self, X, y):
+        permutation_importances = np.column_stack([tree.permutation_importances(X, y) for tree in self.trees])
+        return np.mean(permutation_importances, axis=1)
 
 class Regression_Gradient_Boosting():
     def __init__(self, number_of_trees=100, max_depth=3, minimum_samples_split=25, learning_rate=0.1):
@@ -372,8 +402,6 @@ class Regression_Gradient_Boosting():
         self.learning_rate = learning_rate
         self.initial_prediction = 0
         self.trees = []
-        self.features_importance_ = np.array([])
-        self.direction_of_change_ = np.array([])
 
     def fit(self, X, y):
         self.initial_prediction = np.mean(y)
@@ -384,26 +412,32 @@ class Regression_Gradient_Boosting():
             regression_tree.fit(X, residuals)
             current_prediction = current_prediction + self.learning_rate * regression_tree.predict(X)
             self.trees.append(regression_tree)
-            if len(self.features_importance_) == 0:
-                self.features_importance_ = regression_tree.features_importance().reshape(-1, 1).copy()
-            else:
-                self.features_importance_ = np.hstack((self.features_importance_, regression_tree.features_importance().reshape(-1, 1).copy()))
-            if len(self.direction_of_change_) == 0:
-                self.direction_of_change_ = regression_tree.direction_of_change().reshape(-1, 1).copy()
-            else:
-                self.direction_of_change_ = np.hstack((self.direction_of_change_, regression_tree.direction_of_change().reshape(-1, 1).copy()))
 
-    def predict(self, X):
+    def predict(self, X, y=None):
         current_prediction = np.full(shape=X.shape[0], fill_value=self.initial_prediction)
         for tree in self.trees:
             current_prediction = current_prediction + self.learning_rate * tree.predict(X)
         return current_prediction
 
-    def features_importance(self):
-        return np.mean(self.features_importance_, axis=1)
+    def feature_importances(self):
+        sse_decreases = np.column_stack([tree.sse_decreases for tree in self.trees])
+        sse_decrease_per_feature = np.sum(sse_decreases, axis=1)
+        return sse_decrease_per_feature / np.sum(sse_decrease_per_feature)
 
     def direction_of_change(self):
-        return np.mean(self.direction_of_change_, axis=1)
+        direction_of_change = np.column_stack([tree.direction_of_change() for tree in self.trees])
+        return np.mean(direction_of_change, axis=1)
+
+    def permutation_importances(self, X, y):
+        current_prediction = np.full(shape=y.shape, fill_value=self.initial_prediction)
+        permutation_importances = []
+        for tree in self.trees:
+            residuals = y - current_prediction
+            current_prediction = current_prediction + self.learning_rate * tree.predict(X)
+            permutation_importance = tree.permutation_importances(X, residuals)
+            permutation_importances.append(permutation_importance)
+        permutation_importances = np.column_stack(permutation_importances)
+        return np.mean(permutation_importances, axis=1)
 
 class Classification_Gradient_Boosting():
     def __init__(self, number_of_trees=100, max_depth=3, minimum_samples_split=25, learning_rate=0.1):
@@ -413,8 +447,6 @@ class Classification_Gradient_Boosting():
         self.learning_rate = learning_rate
         self.initial_prediction = 0
         self.trees = []
-        self.features_importance_ = np.array([])
-        self.direction_of_change_ = np.array([])
 
     def fit(self, X, y):
         self.initial_prediction = np.log((np.sum(y == 1) + 1e-8) / (np.sum(y == 0) + 1e-8))
@@ -426,26 +458,33 @@ class Classification_Gradient_Boosting():
             regression_tree.fit(X, residuals)
             current_prediction = current_prediction + self.learning_rate * regression_tree.predict(X)
             self.trees.append(regression_tree)
-            if len(self.features_importance_) == 0:
-                self.features_importance_ = regression_tree.features_importance().reshape(-1, 1).copy()
-            else:
-                self.features_importance_ = np.hstack((self.features_importance_, regression_tree.features_importance().reshape(-1, 1).copy()))
-            if len(self.direction_of_change_) == 0:
-                self.direction_of_change_ = regression_tree.direction_of_change().reshape(-1, 1).copy()
-            else:
-                self.direction_of_change_ = np.hstack((self.direction_of_change_, regression_tree.direction_of_change().reshape(-1, 1).copy()))
             
-    def predict(self, X):
+    def predict(self, X, y=None):
         current_prediction = np.full(shape=X.shape[0], fill_value=self.initial_prediction)
         for tree in self.trees:
             current_prediction = current_prediction + self.learning_rate * tree.predict(X)
         return 1 / (1 + np.exp(-current_prediction))
 
-    def features_importance(self):
-        return np.mean(self.features_importance_, axis=1)
+    def feature_importances(self):
+        sse_decreases = np.column_stack([tree.sse_decreases for tree in self.trees])
+        sse_decrease_per_feature = np.sum(sse_decreases, axis=1)
+        return sse_decrease_per_feature / np.sum(sse_decrease_per_feature)
 
     def direction_of_change(self):
-        return np.mean(self.direction_of_change_, axis=1)
+        direction_of_change = np.column_stack([tree.direction_of_change() for tree in self.trees])
+        return np.mean(direction_of_change, axis=1)
+
+    def permutation_importances(self, X, y):
+        current_prediction = np.full(shape=y.shape, fill_value=self.initial_prediction)
+        permutation_importances = []
+        for tree in self.trees:
+            p = 1 / (1 + np.exp(-current_prediction))
+            residuals = y - p
+            current_prediction = current_prediction + self.learning_rate * tree.predict(X)
+            permutation_importance = tree.permutation_importances(X, residuals)
+            permutation_importances.append(permutation_importance)
+        permutation_importances = np.column_stack(permutation_importances)
+        return np.mean(permutation_importances, axis=1)
 
 class Regression_Neural_Network():
     def __init__(self, epochs=1000, learning_rate=0.001):
