@@ -199,7 +199,7 @@ class Regression_Tree():
             permutation_importances.append(np.mean(feature_rmse_increase))
         permutation_importances = np.array(permutation_importances)
         permutation_importances = np.where(permutation_importances > 0, permutation_importances, 0)
-        permutation_importances = permutation_importances / (np.sum(permutation_importances) + 1e-8)
+        permutation_importances = permutation_importances / np.sum(permutation_importances)
         return permutation_importances
 
 class Classification_Tree():
@@ -301,6 +301,7 @@ class Classification_Tree():
 
     def permutation_importances(self, X, y):
         predictions_full = self.predict(X)
+        predictions_full = [1 if x > 0.5 else 0 for x in predictions_full]
         accuracy_full = np.sum(y == predictions_full) / len(y)
         permutation_importances = []
         for feature in range(0, X.shape[1]):
@@ -309,13 +310,14 @@ class Classification_Tree():
                 X_ = X.copy()
                 np.random.shuffle(X_[:, feature])
                 predictions = self.predict(X_)
+                predictions = [1 if x > 0.5 else 0 for x in predictions]
                 accuracy = np.sum(y == predictions) / len(y)
                 accuracy_decrease = accuracy_full - accuracy
                 feature_accuracy_increase.append(accuracy_decrease)
             permutation_importances.append(np.mean(feature_accuracy_increase))
         permutation_importances = np.array(permutation_importances)
         permutation_importances = np.where(permutation_importances > 0, permutation_importances, 0)
-        permutation_importances = permutation_importances / (np.sum(permutation_importances) + 1e-8)
+        permutation_importances = permutation_importances / np.sum(permutation_importances)
         return permutation_importances
 
 class Regression_Random_Forest():
@@ -413,7 +415,7 @@ class Regression_Gradient_Boosting():
             current_prediction = current_prediction + self.learning_rate * regression_tree.predict(X)
             self.trees.append(regression_tree)
 
-    def predict(self, X, y=None):
+    def predict(self, X):
         current_prediction = np.full(shape=X.shape[0], fill_value=self.initial_prediction)
         for tree in self.trees:
             current_prediction = current_prediction + self.learning_rate * tree.predict(X)
@@ -459,7 +461,7 @@ class Classification_Gradient_Boosting():
             current_prediction = current_prediction + self.learning_rate * regression_tree.predict(X)
             self.trees.append(regression_tree)
             
-    def predict(self, X, y=None):
+    def predict(self, X):
         current_prediction = np.full(shape=X.shape[0], fill_value=self.initial_prediction)
         for tree in self.trees:
             current_prediction = current_prediction + self.learning_rate * tree.predict(X)
@@ -486,129 +488,246 @@ class Classification_Gradient_Boosting():
         permutation_importances = np.column_stack(permutation_importances)
         return np.mean(permutation_importances, axis=1)
 
+class Layer_Regression():
+    def __init__(self, input_size, hidden_size, input, last=False):
+        self.weight = np.random.randn(input_size, hidden_size) * np.sqrt(2 / input_size)
+        self.bias = np.zeros((1, hidden_size))
+        self.weight_gradient = np.array([])
+        self.bias_gradient = np.array([])
+        self.input = input
+        self.linear = self.input @ self.weight + self.bias
+        self.last = last
+        if self.last:
+            self.activation = self.linear
+        else:
+            self.activation = np.where(self.linear > 0, self.linear, 0)
+        self.previous = None
+        self.next = None
+        self.first_moment_weight = np.zeros_like(self.weight)
+        self.second_moment_weight = np.zeros_like(self.weight)
+        self.first_moment_bias = np.zeros_like(self.bias)
+        self.second_moment_bias = np.zeros_like(self.bias)
+
+    def recompute(self, input):
+        self.input = input
+        self.linear = self.input @ self.weight + self.bias
+        if self.last:
+            self.activation = self.linear
+        else:
+            self.activation = np.where(self.linear > 0, self.linear, 0)
+
 class Regression_Neural_Network():
-    def __init__(self, epochs=1000, learning_rate=0.001):
-        self.w1 = np.array([])
-        self.b1 = np.array([])
-        self.w2 = np.array([])
-        self.b2 = np.array([])
+    def __init__(self, hidden_layer_number, hidden_size, epochs=10000, learning_rate=0.001):
+        self.hidden_layer_number = hidden_layer_number
+        self.hidden_size = hidden_size
+        self.layers = []
         self.epochs = epochs
         self.learning_rate = learning_rate
         self.beta_1 = 0.9
         self.beta_2 = 0.999
 
-    def fit(self, X, y, hidden_size):
-        self.w1 = np.random.randn(X.shape[1], hidden_size) * np.sqrt(2 / X.shape[1])
-        self.b1 = np.random.randn(1, hidden_size) * np.sqrt(2 / hidden_size)
-        self.w2 = np.random.randn(hidden_size, 1)
-        self.b2 = np.random.randn(1, 1)
-        first_moment_w1 = np.zeros_like(self.w1)
-        second_moment_w1 = np.zeros_like(self.w1)
-        first_moment_b1 = np.zeros_like(self.b1)
-        second_moment_b1 = np.zeros_like(self.b1)
-        first_moment_w2 = np.zeros_like(self.w2)
-        second_moment_w2 = np.zeros_like(self.w2)
-        first_moment_b2 = np.zeros_like(self.b2)
-        second_moment_b2 = np.zeros_like(self.b2)
+    def build_network(self, X, y, current_number=1, previous_layer=None):
+        if current_number >= self.hidden_layer_number:
+            output_layer = Layer_Regression(self.hidden_size, 1, previous_layer.activation, last=True)
+            output_layer.previous = previous_layer
+            output_layer.next = None
+            self.layers.append(output_layer)
+            return output_layer
+        layer = Layer_Regression(self.hidden_size, self.hidden_size, previous_layer.activation)
+        layer.previous = previous_layer
+        layer.next = self.build_network(X, y, current_number+1, layer)
+        self.layers.append(layer)
+        return layer
+
+    def fit(self, X, y):
+        y_ = y.reshape(-1, 1).copy()
+        input_layer = Layer_Regression(X.shape[1], self.hidden_size, X)
+        input_layer.previous = None
+        input_layer.next = self.build_network(X, y_, 1, input_layer)
+        self.layers.append(input_layer)
 
         for i in range(0, self.epochs):
-            z1 = X @ self.w1 + self.b1
-            a1 = np.where(z1>0, z1, 0.01*z1)
-            z2 = a1 @ self.w2 + self.b2
-            a2 = z2
-            y_hat = a2
-            
-            grad_w2 = (np.transpose(a1) @ (-2 * (y-y_hat))) / X.shape[0]
-            grad_b2 = (np.sum(-2 * (y-y_hat), axis=0, keepdims=True)) / X.shape[0]
-            grad_w1 = (np.transpose(X) @ ((-2 * (y-y_hat)) @ np.transpose(self.w2) * np.where(z1>0, 1, 0.01))) / X.shape[0]
-            grad_b1 = (np.sum((-2 * (y-y_hat)) @ np.transpose(self.w2) * np.where(z1>0, 1, 0.01), axis=0, keepdims=True)) / X.shape[0]
+            previous_layer = None
+            for layer in reversed(self.layers):
+                if previous_layer is None:
+                    layer.recompute(X)
+                    previous_layer = layer
+                else:
+                    layer.recompute(previous_layer.activation)
+                    previous_layer = layer
 
-            first_moment_w2, second_moment_w2, m_hat_w2, v_hat_w2 = self.adam_optimizing(grad_w2, first_moment_w2, second_moment_w2, i)
-            first_moment_b2, second_moment_b2, m_hat_b2, v_hat_b2 = self.adam_optimizing(grad_b2, first_moment_b2, second_moment_b2, i)
-            first_moment_w1, second_moment_w1, m_hat_w1, v_hat_w1 = self.adam_optimizing(grad_w1, first_moment_w1, second_moment_w1, i)
-            first_moment_b1, second_moment_b1, m_hat_b1, v_hat_b1 = self.adam_optimizing(grad_b1, first_moment_b1, second_moment_b1, i)
+            y_hat = self.layers[0].activation
+            n = len(y_)
+            delta = -2 * (y_ - y_hat) / n
 
-            self.w2 = self.w2 - self.learning_rate * (m_hat_w2 / (np.sqrt(v_hat_w2) + 1e-8))
-            self.b2 = self.b2 - self.learning_rate * (m_hat_b2 / (np.sqrt(v_hat_b2) + 1e-8))
-            self.w1 = self.w1 -self.learning_rate * (m_hat_w1 / (np.sqrt(v_hat_w1) + 1e-8))
-            self.b1 = self.b1 - self.learning_rate * (m_hat_b1 / (np.sqrt(v_hat_b1) + 1e-8))
+            for layer in self.layers:
+                layer.bias_gradient = np.sum(delta, axis=0, keepdims=True)
+                layer.weight_gradient = layer.input.T @ delta
 
-    def adam_optimizing(self, grad, first_moment, second_moment, index):
-        first_moment = self.beta_1 * first_moment + (1 - self.beta_1) * grad 
-        second_moment = self.beta_2 * second_moment + (1 - self.beta_2) * np.square(grad)
-        m_hat = first_moment / (1 - self.beta_1 ** (index+1))
-        v_hat = second_moment / (1 - self.beta_2 ** (index+1))
-        return first_moment, second_moment, m_hat, v_hat
-    
+                if layer.previous is not None:
+                    delta = (delta @ layer.weight.T) * (layer.previous.linear > 0)
+
+                layer.first_moment_weight = self.beta_1 * layer.first_moment_weight + (1 - self.beta_1) * layer.weight_gradient
+                layer.first_moment_bias = self.beta_1 * layer.first_moment_bias + (1 - self.beta_1) * layer.bias_gradient
+                layer.second_moment_weight = self.beta_2 * layer.second_moment_weight + (1 - self.beta_2) * np.square(layer.weight_gradient)
+                layer.second_moment_bias = self.beta_2 * layer.second_moment_bias + (1 - self.beta_2) * np.square(layer.bias_gradient)
+
+                m_hat_weight = layer.first_moment_weight / (1 - self.beta_1 ** (i+1))
+                v_hat_weight = layer.second_moment_weight / (1 - self.beta_2 ** (i+1))
+                m_hat_bias = layer.first_moment_bias / (1 - self.beta_1 ** (i+1))
+                v_hat_bias = layer.second_moment_bias / (1 - self.beta_2 ** (i+1))
+
+                layer.weight = layer.weight - self.learning_rate * (m_hat_weight / (np.sqrt(v_hat_weight) + 1e-8))
+                layer.bias = layer.bias - self.learning_rate * (m_hat_bias / (np.sqrt(v_hat_bias) + 1e-8))
+
     def predict(self, X):
-        z1 = X @ self.w1 + self.b1
-        a1 = np.where(z1>0, z1, 0.01*z1)
-        z2 = a1 @ self.w2 + self.b2
-        a2 = z2
-        y_hat = a2
+        previous_layer = None
+        for layer in reversed(self.layers):
+            if previous_layer is None:
+                layer.recompute(X)
+                previous_layer = layer
+            else:
+                layer.recompute(previous_layer.activation)
+                previous_layer = layer
+        y_hat = previous_layer.activation.reshape(-1).copy()
         return y_hat
+
+    def permutation_importances(self, X, y):
+        predictions_full = self.predict(X)
+        rmse_full = np.sqrt(np.mean((y - predictions_full)**2))
+        permutation_importances = []
+        for feature in range(0, X.shape[1]):
+            feature_rmse_increase = []
+            for i in range(0, 10):
+                X_ = X.copy()
+                np.random.shuffle(X_[:, feature])
+                predictions = self.predict(X_)
+                rmse = np.sqrt(np.mean((y - predictions)**2))
+                rmse_increase = rmse - rmse_full
+                feature_rmse_increase.append(rmse_increase)
+            permutation_importances.append(np.mean(feature_rmse_increase))
+        permutation_importances = np.array(permutation_importances)
+        permutation_importances = np.where(permutation_importances > 0, permutation_importances, 0)
+        permutation_importances = permutation_importances / np.sum(permutation_importances)
+        return permutation_importances
+
+class Layer_Classification():
+    def __init__(self, input_size, hidden_size, input):
+        self.weight = np.random.randn(input_size, hidden_size) * np.sqrt(2 / input_size)
+        self.bias = np.zeros((1, hidden_size))
+        self.weight_gradient = np.array([])
+        self.bias_gradient = np.array([])
+        self.input = input
+        self.linear = self.input @ self.weight + self.bias
+        self.activation = 1 / (1 + np.exp(-self.linear))
+        self.previous = None
+        self.next = None
+        self.first_moment_weight = np.zeros_like(self.weight)
+        self.second_moment_weight = np.zeros_like(self.weight)
+        self.first_moment_bias = np.zeros_like(self.bias)
+        self.second_moment_bias = np.zeros_like(self.bias)
+
+    def recompute(self, input):
+        self.input = input
+        self.linear = self.input @ self.weight + self.bias
+        self.activation = 1 / (1 + np.exp(-self.linear))
 
 class Classification_Neural_Network():
-    def __init__(self, epochs=1000, learning_rate=0.001):
-        self.w1 = np.array([])
-        self.b1 = np.array([])
-        self.w2 = np.array([])
-        self.b2 = np.array([])
+    def __init__(self, hidden_layer_number, hidden_size, epochs=10000, learning_rate=0.001):
+        self.hidden_layer_number = hidden_layer_number
+        self.hidden_size = hidden_size
+        self.layers = []
         self.epochs = epochs
         self.learning_rate = learning_rate
         self.beta_1 = 0.9
         self.beta_2 = 0.999
 
-    def fit(self, X, y, hidden_size):
-        self.w1 = np.random.randn(X.shape[1], hidden_size) * np.sqrt(2 / X.shape[1])
-        self.b1 = np.random.randn(1, hidden_size) * np.sqrt(2 / hidden_size)
-        self.w2 = np.random.randn(hidden_size, 1)
-        self.b2 = np.random.randn(1, 1)
-        first_moment_w1 = np.zeros_like(self.w1)
-        second_moment_w1 = np.zeros_like(self.w1)
-        first_moment_b1 = np.zeros_like(self.b1)
-        second_moment_b1 = np.zeros_like(self.b1)
-        first_moment_w2 = np.zeros_like(self.w2)
-        second_moment_w2 = np.zeros_like(self.w2)
-        first_moment_b2 = np.zeros_like(self.b2)
-        second_moment_b2 = np.zeros_like(self.b2)
+    def build_network(self, X, y, current_number=1, previous_layer=None):
+        if current_number >= self.hidden_layer_number:
+            output_layer = Layer_Classification(self.hidden_size, 1, previous_layer.activation)
+            output_layer.previous = previous_layer
+            output_layer.next = None
+            self.layers.append(output_layer)
+            return output_layer
+        layer = Layer_Classification(self.hidden_size, self.hidden_size, previous_layer.activation)
+        layer.previous = previous_layer
+        layer.next = self.build_network(X, y, current_number+1, layer)
+        self.layers.append(layer)
+        return layer
+
+    def fit(self, X, y):
+        y_ = y.reshape(-1, 1).copy()
+        input_layer = Layer_Classification(X.shape[1], self.hidden_size, X)
+        input_layer.previous = None
+        input_layer.next = self.build_network(X, y_, 1, input_layer)
+        self.layers.append(input_layer)
 
         for i in range(0, self.epochs):
-            z1 = X @ self.w1 + self.b1
-            a1 = 1 / (1 + np.exp(-z1))
-            z2 = a1 @ self.w2 + self.b2
-            a2 = 1 / (1 + np.exp(-z2))
-            y_hat = a2
-            
-            grad_w2 = (np.transpose(a1) @ -(y-y_hat)) / X.shape[0] 
-            grad_b2 = (np.sum(-(y-y_hat), axis=0, keepdims=True)) / X.shape[0]
-            grad_w1 = (np.transpose(X) @ ((-(y-y_hat) @ np.transpose(self.w2)) * a1 * (np.ones_like(a1)-a1))) / X.shape[0]
-            grad_b1 = (np.sum(-(y-y_hat) @ np.transpose(self.w2) * a1 * (np.ones_like(a1)-a1), axis=0, keepdims=True)) / X.shape[0]
+            previous_layer = None
+            for layer in reversed(self.layers):
+                if previous_layer is None:
+                    layer.recompute(X)
+                    previous_layer = layer
+                else:
+                    layer.recompute(previous_layer.activation)
+                    previous_layer = layer
 
-            first_moment_w2, second_moment_w2, m_hat_w2, v_hat_w2 = self.adam_optimizing(grad_w2, first_moment_w2, second_moment_w2, i)
-            first_moment_b2, second_moment_b2, m_hat_b2, v_hat_b2 = self.adam_optimizing(grad_b2, first_moment_b2, second_moment_b2, i)
-            first_moment_w1, second_moment_w1, m_hat_w1, v_hat_w1 = self.adam_optimizing(grad_w1, first_moment_w1, second_moment_w1, i)
-            first_moment_b1, second_moment_b1, m_hat_b1, v_hat_b1 = self.adam_optimizing(grad_b1, first_moment_b1, second_moment_b1, i)
+            y_hat = self.layers[0].activation
+            n = len(y_)
+            delta = -2 * (y_ - y_hat) / n
 
-            self.w2 = self.w2 - self.learning_rate * (m_hat_w2 / (np.sqrt(v_hat_w2) + 1e-8))
-            self.b2 = self.b2 - self.learning_rate * (m_hat_b2 / (np.sqrt(v_hat_b2) + 1e-8))
-            self.w1 = self.w1 -self.learning_rate * (m_hat_w1 / (np.sqrt(v_hat_w1) + 1e-8))
-            self.b1 = self.b1 - self.learning_rate * (m_hat_b1 / (np.sqrt(v_hat_b1) + 1e-8))
+            for layer in self.layers:
+                layer.bias_gradient = np.sum(delta, axis=0, keepdims=True)
+                layer.weight_gradient = layer.input.T @ delta
 
-    def adam_optimizing(self, grad, first_moment, second_moment, index):
-        first_moment = self.beta_1 * first_moment + (1 - self.beta_1) * grad 
-        second_moment = self.beta_2 * second_moment + (1 - self.beta_2) * np.square(grad)
-        m_hat = first_moment / (1 - self.beta_1 ** (index+1))
-        v_hat = second_moment / (1 - self.beta_2 ** (index+1))
-        return first_moment, second_moment, m_hat, v_hat
-    
+                if layer.previous is not None:
+                    delta = (delta @ layer.weight.T) * (layer.previous.linear > 0)
+
+                layer.first_moment_weight = self.beta_1 * layer.first_moment_weight + (1 - self.beta_1) * layer.weight_gradient
+                layer.first_moment_bias = self.beta_1 * layer.first_moment_bias + (1 - self.beta_1) * layer.bias_gradient
+                layer.second_moment_weight = self.beta_2 * layer.second_moment_weight + (1 - self.beta_2) * np.square(layer.weight_gradient)
+                layer.second_moment_bias = self.beta_2 * layer.second_moment_bias + (1 - self.beta_2) * np.square(layer.bias_gradient)
+
+                m_hat_weight = layer.first_moment_weight / (1 - self.beta_1 ** (i+1))
+                v_hat_weight = layer.second_moment_weight / (1 - self.beta_2 ** (i+1))
+                m_hat_bias = layer.first_moment_bias / (1 - self.beta_1 ** (i+1))
+                v_hat_bias = layer.second_moment_bias / (1 - self.beta_2 ** (i+1))
+
+                layer.weight = layer.weight - self.learning_rate * (m_hat_weight / (np.sqrt(v_hat_weight) + 1e-8))
+                layer.bias = layer.bias - self.learning_rate * (m_hat_bias / (np.sqrt(v_hat_bias) + 1e-8))
+
     def predict(self, X):
-        z1 = X @ self.w1 + self.b1
-        a1 = 1 / (1 + np.exp(-z1))
-        z2 = a1 @ self.w2 + self.b2
-        a2 = 1 / (1 + np.exp(-z2))
-        y_hat = a2
+        previous_layer = None
+        for layer in reversed(self.layers):
+            if previous_layer is None:
+                layer.recompute(X)
+                previous_layer = layer
+            else:
+                layer.recompute(previous_layer.activation)
+                previous_layer = layer
+        y_hat = previous_layer.activation.reshape(-1).copy()
         return y_hat
+
+    def permutation_importances(self, X, y):
+        predictions_full = self.predict(X)
+        predictions_full = [1 if x > 0.5 else 0 for x in predictions_full]
+        accuracy_full = np.mean(y == predictions_full)
+        permutation_importances = []
+        for feature in range(0, X.shape[1]):
+            feature_accuracy_decrease = []
+            for i in range(0, 10):
+                X_ = X.copy()
+                np.random.shuffle(X_[:, feature])
+                predictions = self.predict(X_)
+                predictions = [1 if x > 0.5 else 0 for x in predictions]
+                accuracy = np.mean(y == predictions)
+                accuracy_decrease = accuracy_full - accuracy
+                feature_accuracy_decrease.append(accuracy_decrease)
+            permutation_importances.append(np.mean(feature_accuracy_decrease))
+        permutation_importances = np.array(permutation_importances)
+        permutation_importances = np.where(permutation_importances > 0, permutation_importances, 0)
+        permutation_importances = permutation_importances / np.sum(permutation_importances)
+        return permutation_importances
 
 def train_test_split(number_of_elements, testing_size):
     training_index = [i for i in range(0, number_of_elements)]
