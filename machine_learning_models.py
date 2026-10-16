@@ -1,25 +1,96 @@
 import numpy as np
+rng = np.random.default_rng(seed=43)
 
-class Ridge_Regression():
-    def __init__(self):
+class Model_Agnostic_Measures():
+    def permutation_importances(self, X, y, groups):
+        predictions_full = self.predict(X)
+        rmse_full = np.sqrt(np.mean((y - predictions_full)**2))
+        permutation_importances = []
+        for group in groups:
+            group_rmse_increase = []
+            for i in range(0, 10):
+                X_ = X.copy()
+                permutated_rows = rng.permutation(len(X_))
+                X_[:, group] = X[permutated_rows][:, group]
+                predictions = self.predict(X_)
+                rmse = np.sqrt(np.mean((y - predictions)**2))
+                rmse_increase = rmse - rmse_full
+                group_rmse_increase.append(rmse_increase)
+            for j in range(0, len(group)):
+                permutation_importances.append(np.mean(group_rmse_increase))
+        permutation_importances = np.array(permutation_importances)
+        permutation_importances = np.where(permutation_importances > 0, permutation_importances, 0)
+        permutation_importances = permutation_importances / np.sum(permutation_importances)
+        return permutation_importances
+
+    def marginal_importance(self, X, y, groups, continuous_predictors):
+        differences = []
+        for group in groups:
+            X_ = X.copy()
+            if len(group) > 1:
+                for column in group:
+                    group_without_column = group.copy()
+                    group_without_column.remove(column)
+                    X_ones = X.copy()
+                    X_ones[:, column] = 1
+                    for column_excluded in group_without_column:
+                        X_ones[:, column_excluded] = 0
+                    predictions_ones = self.predict(X_ones)
+                    X_zeros = X.copy()
+                    X_zeros[:, column] = 0
+                    all_predictions = []
+                    for column_excluded in group_without_column:
+                        group_without_excluded_column = group_without_column.copy()
+                        group_without_excluded_column.remove(column_excluded)
+                        X_loop = X_zeros.copy()
+                        X_loop[:, column_excluded] = 1
+                        X_loop[:, group_without_excluded_column] = 0
+                        predictions = self.predict(X_loop)
+                        all_predictions.append(predictions)
+                    predictions_zeros = np.mean(all_predictions)
+                    difference = np.mean(predictions_ones - predictions_zeros)
+                    differences.append(difference)
+            else:
+                if group[0] in continuous_predictors:
+                    X_high = X_.copy()
+                    X_high[:, group] += np.std(X_high[:, group])
+                    predictions_high = self.predict(X_high)
+                    predictions = self.predict(X_)
+                    difference = np.mean((predictions_high - predictions) / np.std(X_[:, group]))
+                    differences.append(difference)
+                else:
+                    X_ones = X.copy()
+                    X_zeros = X.copy()
+                    X_ones[:, group] = 1
+                    X_zeros[:, group] = 0
+                    predictions_ones = self.predict(X_ones)
+                    predictions_zeros = self.predict(X_zeros)
+                    difference = np.mean(predictions_ones - predictions_zeros)
+                    differences.append(difference)
+        differences = np.array(differences)
+        return differences
+
+class Ridge_Regression(Model_Agnostic_Measures):
+    def __init__(self, alpha):
         self.parameters = np.array([])
+        self.alpha = alpha
         self.y_mean = 0
         self.X_mean = 0
 
-    def fit(self, X, y, alpha):
+    def fit(self, X, y):
         self.y_mean = np.mean(y)
         self.X_mean = np.mean(X, axis=0)
         X_ = (X - self.X_mean).copy()
         y_ = (y - self.y_mean).reshape(-1, 1).copy()
-        self.parameters = np.linalg.inv(X_.T @ X_ + alpha * np.identity((X_.T @ X_).shape[0])) @ X_.T @ y_
+        self.parameters = np.linalg.inv(X_.T @ X_ + self.alpha * np.identity((X_.T @ X_).shape[0])) @ X_.T @ y_
 
     def predict(self, X):
         y_hat = X @ self.parameters + self.y_mean - self.parameters.T @ self.X_mean.reshape(-1, 1).copy()
         y_hat = y_hat.reshape(-1)
         return y_hat
 
-class Logistic_Regression():
-    def __init__(self, max_iterations=1000, record_losses=False):
+class Logistic_Regression(Model_Agnostic_Measures):
+    def __init__(self, alpha, max_iterations=1000):
         self.parameters = np.array([])
         self.first_moment_r = np.array([])
         self.second_moment_r = np.array([])
@@ -31,11 +102,9 @@ class Logistic_Regression():
         self.beta_1 = 0.9
         self.beta_2 = 0.999
         self.max_iterations = max_iterations
-        self.record_losses = record_losses
-        self.losses = []
-        self.iterations = []
+        self.alpha = alpha
 
-    def fit(self, X, y, alpha):
+    def fit(self, X, y):
         X_ = X.copy()
         y_ = y.reshape(-1, 1).copy()
         self.parameters = np.zeros(X_.shape[1]).reshape(-1, 1)
@@ -47,7 +116,7 @@ class Logistic_Regression():
         for i in range(0, self.max_iterations):
             previous_parameters = self.parameters.copy()
             p = 1/(1+np.exp(-(X_ @ self.parameters + self.bias_vector)))
-            grad_w = -(np.transpose(X_) @ (y_ - p) -2 * X_.shape[0] * alpha * self.parameters) * (1/X_.shape[0])
+            grad_w = -(np.transpose(X_) @ (y_ - p) -2 * X_.shape[0] * self.alpha * self.parameters) * (1/X_.shape[0])
             grad_b = -(np.mean(y_ - p))
             self.first_moment_r = self.beta_1 * self.first_moment_r + (1-self.beta_1) * grad_w 
             self.second_moment_r = self.beta_2 * self.second_moment_r + (1-self.beta_2) * np.square(grad_w)
@@ -60,18 +129,12 @@ class Logistic_Regression():
             self.parameters = self.parameters - self.learning_rate * (m_hat_w / (np.sqrt(v_hat_w) + 1e-8))
             self.bias = self.bias - self.learning_rate * (m_hat_b / (np.sqrt(v_hat_b) + 1e-8))
             self.bias_vector = np.full(shape=y_.shape[0], fill_value=self.bias).reshape(-1, 1)
-            if self.record_losses:
-                loss = (-1/y_.shape[0]) * np.sum(y_ * np.log(p) + (np.ones_like(y_) - y_) * np.log(np.ones_like(p) - p))
-                self.losses.append(loss)
-                self.iterations.append(i+1)
-            if np.max(np.abs(self.parameters - previous_parameters)) < 1e-12:
-                break
 
     def predict(self, X):
         bias_vector_prediction = np.full(shape=X.shape[0], fill_value=self.bias).reshape(-1, 1)
         y_hat = 1/(1+np.exp(-(X @ self.parameters + bias_vector_prediction)))
         y_hat = y_hat.reshape(-1)
-        return y_hat    
+        return y_hat
 
 class Node():
     def __init__(self, feature=None, threshold=0, left=None, right=None, value=None):
@@ -84,7 +147,7 @@ class Node():
     def is_leaf_node(self):
         return self.value is not None
 
-class Regression_Tree():
+class Regression_Tree(Model_Agnostic_Measures):
     def __init__(self, number_of_random_features, minimum_samples_split=100, max_depth=100, hessian=None):
         self.minimum_samples_split = minimum_samples_split
         self.max_depth = max_depth
@@ -92,7 +155,6 @@ class Regression_Tree():
         self.number_of_random_features = number_of_random_features
         self.hessian = hessian
         self.sse_decreases = np.array([])
-        self.sum_of_changes = np.array([])
         self.root = None
         self.total_count = 0
 
@@ -137,7 +199,6 @@ class Regression_Tree():
         left_mask = X[:, best_predictor] <= best_midpoint
         right_mask = ~left_mask
         self.sse_decreases[best_predictor] += initial_sse - best_sse
-        self.sum_of_changes[best_predictor] += len(y) / self.total_count * (np.mean(y[right_mask]) - np.mean(y[left_mask]))
         return best_predictor, best_midpoint, True
     
     def fit(self, X, y):
@@ -180,36 +241,13 @@ class Regression_Tree():
     def feature_importances(self):
         return self.sse_decreases / np.sum(self.sse_decreases)
 
-    def direction_of_change(self):
-        return self.sum_of_changes
-
-    def permutation_importances(self, X, y):
-        predictions_full = self.predict(X)
-        rmse_full = np.sqrt(np.mean((y - predictions_full)**2))
-        permutation_importances = []
-        for feature in range(0, X.shape[1]):
-            feature_rmse_increase = []
-            for i in range(0, 10):
-                X_ = X.copy()
-                np.random.shuffle(X_[:, feature])
-                predictions = self.predict(X_)
-                rmse = np.sqrt(np.mean((y - predictions)**2))
-                rmse_increase = rmse - rmse_full
-                feature_rmse_increase.append(rmse_increase)
-            permutation_importances.append(np.mean(feature_rmse_increase))
-        permutation_importances = np.array(permutation_importances)
-        permutation_importances = np.where(permutation_importances > 0, permutation_importances, 0)
-        permutation_importances = permutation_importances / np.sum(permutation_importances)
-        return permutation_importances
-
-class Classification_Tree():
+class Classification_Tree(Model_Agnostic_Measures):
     def __init__(self, number_of_random_features, minimum_samples_split=100, max_depth=100):
         self.minimum_samples_split = minimum_samples_split
         self.max_depth = max_depth
         self.features = np.array([])
         self.number_of_random_features = number_of_random_features
         self.impurity_decreases = np.array([])
-        self.sum_of_changes = np.array([])
         self.root = None
         self.total_count = 0
 
@@ -255,7 +293,6 @@ class Classification_Tree():
         left_mask = X[:, best_predictor] <= best_midpoint
         right_mask = ~left_mask
         self.impurity_decreases[best_predictor] += initial_impurity - best_impurity
-        self.sum_of_changes[best_predictor] += len(y) / self.total_count * (np.mean(y[right_mask]) - np.mean(y[left_mask]))
         return best_predictor, best_midpoint, True
     
     def fit(self, X, y):
@@ -270,11 +307,11 @@ class Classification_Tree():
             prediction = 0
             return Node(value=prediction)
         if depth >= self.max_depth or len(y) < self.minimum_samples_split or len(np.unique(y)) == 1:
-            prediction = np.argmax(np.bincount(y))
+            prediction = np.mean(y)
             return Node(value=prediction)
         best_predictor, best_midpoint, valid_split = self.choose_best_split(X, y)
         if not valid_split:
-            prediction = np.argmax(np.bincount(y))
+            prediction = np.mean(y)
             return Node(value=prediction)
         left_mask = X[:, best_predictor] <= best_midpoint
         right_mask = ~left_mask
@@ -296,31 +333,7 @@ class Classification_Tree():
     def feature_importances(self):
         return self.impurity_decreases / np.sum(self.impurity_decreases)
 
-    def direction_of_change(self):
-        return self.sum_of_changes
-
-    def permutation_importances(self, X, y):
-        predictions_full = self.predict(X)
-        predictions_full = [1 if x > 0.5 else 0 for x in predictions_full]
-        accuracy_full = np.sum(y == predictions_full) / len(y)
-        permutation_importances = []
-        for feature in range(0, X.shape[1]):
-            feature_accuracy_increase = []
-            for i in range(0, 10):
-                X_ = X.copy()
-                np.random.shuffle(X_[:, feature])
-                predictions = self.predict(X_)
-                predictions = [1 if x > 0.5 else 0 for x in predictions]
-                accuracy = np.sum(y == predictions) / len(y)
-                accuracy_decrease = accuracy_full - accuracy
-                feature_accuracy_increase.append(accuracy_decrease)
-            permutation_importances.append(np.mean(feature_accuracy_increase))
-        permutation_importances = np.array(permutation_importances)
-        permutation_importances = np.where(permutation_importances > 0, permutation_importances, 0)
-        permutation_importances = permutation_importances / np.sum(permutation_importances)
-        return permutation_importances
-
-class Regression_Random_Forest():
+class Regression_Random_Forest(Model_Agnostic_Measures):
     def __init__(self, number_of_trees=100, number_of_random_features=1, max_depth=100, minimum_samples_split=20):
         self.number_of_trees = number_of_trees
         self.number_of_random_features = number_of_random_features
@@ -354,11 +367,11 @@ class Regression_Random_Forest():
         direction_of_change = np.column_stack([tree.direction_of_change() for tree in self.trees])
         return np.mean(direction_of_change, axis=1)
 
-    def permutation_importances(self, X, y):
-        permutation_importances = np.column_stack([tree.permutation_importances(X, y) for tree in self.trees])
+    def permutation_importances(self, X, y, groups):
+        permutation_importances = np.column_stack([tree.permutation_importances(X, y, groups) for tree in self.trees])
         return np.mean(permutation_importances, axis=1)
 
-class Classification_Random_Forest():
+class Classification_Random_Forest(Model_Agnostic_Measures):
     def __init__(self, number_of_trees=100, number_of_random_features=1, max_depth=100, minimum_samples_split=20):
             self.number_of_trees = number_of_trees
             self.number_of_random_features = number_of_random_features
@@ -388,15 +401,11 @@ class Classification_Random_Forest():
         feature_importances = np.column_stack([tree.feature_importances() for tree in self.trees])
         return np.mean(feature_importances, axis=1)
 
-    def direction_of_change(self):
-        direction_of_change = np.column_stack([tree.direction_of_change() for tree in self.trees])
-        return np.mean(direction_of_change, axis=1)
-
-    def permutation_importances(self, X, y):
-        permutation_importances = np.column_stack([tree.permutation_importances(X, y) for tree in self.trees])
+    def permutation_importances(self, X, y, groups):
+        permutation_importances = np.column_stack([tree.permutation_importances(X, y, groups) for tree in self.trees])
         return np.mean(permutation_importances, axis=1)
 
-class Regression_Gradient_Boosting():
+class Regression_Gradient_Boosting(Model_Agnostic_Measures):
     def __init__(self, number_of_trees=100, max_depth=3, minimum_samples_split=25, learning_rate=0.1):
         self.number_of_trees = number_of_trees
         self.max_depth = max_depth
@@ -430,18 +439,18 @@ class Regression_Gradient_Boosting():
         direction_of_change = np.column_stack([tree.direction_of_change() for tree in self.trees])
         return np.mean(direction_of_change, axis=1)
 
-    def permutation_importances(self, X, y):
+    def permutation_importances(self, X, y, groups):
         current_prediction = np.full(shape=y.shape, fill_value=self.initial_prediction)
         permutation_importances = []
         for tree in self.trees:
             residuals = y - current_prediction
             current_prediction = current_prediction + self.learning_rate * tree.predict(X)
-            permutation_importance = tree.permutation_importances(X, residuals)
+            permutation_importance = tree.permutation_importances(X, residuals, groups)
             permutation_importances.append(permutation_importance)
         permutation_importances = np.column_stack(permutation_importances)
         return np.mean(permutation_importances, axis=1)
 
-class Classification_Gradient_Boosting():
+class Classification_Gradient_Boosting(Model_Agnostic_Measures):
     def __init__(self, number_of_trees=100, max_depth=3, minimum_samples_split=25, learning_rate=0.1):
         self.number_of_trees = number_of_trees
         self.max_depth = max_depth
@@ -476,14 +485,14 @@ class Classification_Gradient_Boosting():
         direction_of_change = np.column_stack([tree.direction_of_change() for tree in self.trees])
         return np.mean(direction_of_change, axis=1)
 
-    def permutation_importances(self, X, y):
+    def permutation_importances(self, X, y, groups):
         current_prediction = np.full(shape=y.shape, fill_value=self.initial_prediction)
         permutation_importances = []
         for tree in self.trees:
             p = 1 / (1 + np.exp(-current_prediction))
             residuals = y - p
             current_prediction = current_prediction + self.learning_rate * tree.predict(X)
-            permutation_importance = tree.permutation_importances(X, residuals)
+            permutation_importance = tree.permutation_importances(X, residuals, groups)
             permutation_importances.append(permutation_importance)
         permutation_importances = np.column_stack(permutation_importances)
         return np.mean(permutation_importances, axis=1)
@@ -516,12 +525,13 @@ class Layer_Regression():
         else:
             self.activation = np.where(self.linear > 0, self.linear, 0)
 
-class Regression_Neural_Network():
-    def __init__(self, hidden_layer_number, hidden_size, epochs=10000, learning_rate=0.001):
+class Regression_Neural_Network(Model_Agnostic_Measures):
+    def __init__(self, hidden_layer_number, hidden_size, epochs=10000, weight_decay=0, learning_rate=0.001):
         self.hidden_layer_number = hidden_layer_number
         self.hidden_size = hidden_size
         self.layers = []
         self.epochs = epochs
+        self.weight_decay = weight_decay
         self.learning_rate = learning_rate
         self.beta_1 = 0.9
         self.beta_2 = 0.999
@@ -558,14 +568,14 @@ class Regression_Neural_Network():
 
             y_hat = self.layers[0].activation
             n = len(y_)
-            delta = -2 * (y_ - y_hat) / n
+            previous_bias_gradient_uncollapsed = -2 * (y_ - y_hat) / n
 
             for layer in self.layers:
-                layer.bias_gradient = np.sum(delta, axis=0, keepdims=True)
-                layer.weight_gradient = layer.input.T @ delta
+                layer.bias_gradient = np.sum(previous_bias_gradient_uncollapsed, axis=0, keepdims=True)
+                layer.weight_gradient = layer.input.T @ previous_bias_gradient_uncollapsed
 
                 if layer.previous is not None:
-                    delta = (delta @ layer.weight.T) * (layer.previous.linear > 0)
+                    previous_bias_gradient_uncollapsed = (previous_bias_gradient_uncollapsed @ layer.weight.T) * (layer.previous.linear > 0)
 
                 layer.first_moment_weight = self.beta_1 * layer.first_moment_weight + (1 - self.beta_1) * layer.weight_gradient
                 layer.first_moment_bias = self.beta_1 * layer.first_moment_bias + (1 - self.beta_1) * layer.bias_gradient
@@ -577,7 +587,7 @@ class Regression_Neural_Network():
                 m_hat_bias = layer.first_moment_bias / (1 - self.beta_1 ** (i+1))
                 v_hat_bias = layer.second_moment_bias / (1 - self.beta_2 ** (i+1))
 
-                layer.weight = layer.weight - self.learning_rate * (m_hat_weight / (np.sqrt(v_hat_weight) + 1e-8))
+                layer.weight = layer.weight - self.learning_rate * (m_hat_weight / (np.sqrt(v_hat_weight) + 1e-8)) - self.learning_rate * self.weight_decay * layer.weight
                 layer.bias = layer.bias - self.learning_rate * (m_hat_bias / (np.sqrt(v_hat_bias) + 1e-8))
 
     def predict(self, X):
@@ -592,20 +602,22 @@ class Regression_Neural_Network():
         y_hat = previous_layer.activation.reshape(-1).copy()
         return y_hat
 
-    def permutation_importances(self, X, y):
+    def permutation_importances(self, X, y, groups):
         predictions_full = self.predict(X)
         rmse_full = np.sqrt(np.mean((y - predictions_full)**2))
         permutation_importances = []
-        for feature in range(0, X.shape[1]):
-            feature_rmse_increase = []
+        for group in groups:
+            group_rmse_increase = []
             for i in range(0, 10):
                 X_ = X.copy()
-                np.random.shuffle(X_[:, feature])
+                permutated_rows = rng.permutation(len(X_))
+                X_[:, group] = X[permutated_rows][:, group]
                 predictions = self.predict(X_)
                 rmse = np.sqrt(np.mean((y - predictions)**2))
                 rmse_increase = rmse - rmse_full
-                feature_rmse_increase.append(rmse_increase)
-            permutation_importances.append(np.mean(feature_rmse_increase))
+                group_rmse_increase.append(rmse_increase)
+            for j in range(0, len(group)):
+                permutation_importances.append(np.mean(group_rmse_increase))
         permutation_importances = np.array(permutation_importances)
         permutation_importances = np.where(permutation_importances > 0, permutation_importances, 0)
         permutation_importances = permutation_importances / np.sum(permutation_importances)
@@ -632,12 +644,13 @@ class Layer_Classification():
         self.linear = self.input @ self.weight + self.bias
         self.activation = 1 / (1 + np.exp(-self.linear))
 
-class Classification_Neural_Network():
-    def __init__(self, hidden_layer_number, hidden_size, epochs=10000, learning_rate=0.001):
+class Classification_Neural_Network(Model_Agnostic_Measures):
+    def __init__(self, hidden_layer_number, hidden_size, epochs=10000, weight_decay=0, learning_rate=0.001):
         self.hidden_layer_number = hidden_layer_number
         self.hidden_size = hidden_size
         self.layers = []
         self.epochs = epochs
+        self.weight_decay = weight_decay
         self.learning_rate = learning_rate
         self.beta_1 = 0.9
         self.beta_2 = 0.999
@@ -674,14 +687,14 @@ class Classification_Neural_Network():
 
             y_hat = self.layers[0].activation
             n = len(y_)
-            delta = -2 * (y_ - y_hat) / n
+            previous_bias_gradient_uncollapsed = -2 * (y_ - y_hat) / n
 
             for layer in self.layers:
-                layer.bias_gradient = np.sum(delta, axis=0, keepdims=True)
-                layer.weight_gradient = layer.input.T @ delta
+                layer.bias_gradient = np.sum(previous_bias_gradient_uncollapsed, axis=0, keepdims=True)
+                layer.weight_gradient = layer.input.T @ previous_bias_gradient_uncollapsed
 
                 if layer.previous is not None:
-                    delta = (delta @ layer.weight.T) * (layer.previous.linear > 0)
+                    previous_bias_gradient_uncollapsed = (previous_bias_gradient_uncollapsed @ layer.weight.T) * (layer.previous.linear > 0)
 
                 layer.first_moment_weight = self.beta_1 * layer.first_moment_weight + (1 - self.beta_1) * layer.weight_gradient
                 layer.first_moment_bias = self.beta_1 * layer.first_moment_bias + (1 - self.beta_1) * layer.bias_gradient
@@ -693,7 +706,7 @@ class Classification_Neural_Network():
                 m_hat_bias = layer.first_moment_bias / (1 - self.beta_1 ** (i+1))
                 v_hat_bias = layer.second_moment_bias / (1 - self.beta_2 ** (i+1))
 
-                layer.weight = layer.weight - self.learning_rate * (m_hat_weight / (np.sqrt(v_hat_weight) + 1e-8))
+                layer.weight = layer.weight - self.learning_rate * (m_hat_weight / (np.sqrt(v_hat_weight) + 1e-8)) - self.learning_rate * self.weight_decay * layer.weight
                 layer.bias = layer.bias - self.learning_rate * (m_hat_bias / (np.sqrt(v_hat_bias) + 1e-8))
 
     def predict(self, X):
@@ -707,27 +720,6 @@ class Classification_Neural_Network():
                 previous_layer = layer
         y_hat = previous_layer.activation.reshape(-1).copy()
         return y_hat
-
-    def permutation_importances(self, X, y):
-        predictions_full = self.predict(X)
-        predictions_full = [1 if x > 0.5 else 0 for x in predictions_full]
-        accuracy_full = np.mean(y == predictions_full)
-        permutation_importances = []
-        for feature in range(0, X.shape[1]):
-            feature_accuracy_decrease = []
-            for i in range(0, 10):
-                X_ = X.copy()
-                np.random.shuffle(X_[:, feature])
-                predictions = self.predict(X_)
-                predictions = [1 if x > 0.5 else 0 for x in predictions]
-                accuracy = np.mean(y == predictions)
-                accuracy_decrease = accuracy_full - accuracy
-                feature_accuracy_decrease.append(accuracy_decrease)
-            permutation_importances.append(np.mean(feature_accuracy_decrease))
-        permutation_importances = np.array(permutation_importances)
-        permutation_importances = np.where(permutation_importances > 0, permutation_importances, 0)
-        permutation_importances = permutation_importances / np.sum(permutation_importances)
-        return permutation_importances
 
 def train_test_split(number_of_elements, testing_size):
     training_index = [i for i in range(0, number_of_elements)]
