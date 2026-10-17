@@ -23,7 +23,7 @@ class Model_Agnostic_Measures():
         permutation_importances = permutation_importances / np.sum(permutation_importances)
         return permutation_importances
 
-    def marginal_importance(self, X, y, groups, continuous_predictors):
+    def marginal_importance(self, X, y, groups, continuous_predictors, mean=None, std=None):
         differences = []
         for group in groups:
             X_ = X.copy()
@@ -36,6 +36,10 @@ class Model_Agnostic_Measures():
                     for column_excluded in group_without_column:
                         X_ones[:, column_excluded] = 0
                     predictions_ones = self.predict(X_ones)
+                    if mean is not None and std is not None:
+                        predictions_ones = (predictions_ones * std) + mean
+                    else:
+                        predictions_ones = predictions_ones
                     X_zeros = X.copy()
                     X_zeros[:, column] = 0
                     all_predictions = []
@@ -47,7 +51,10 @@ class Model_Agnostic_Measures():
                         X_loop[:, group_without_excluded_column] = 0
                         predictions = self.predict(X_loop)
                         all_predictions.append(predictions)
-                    predictions_zeros = np.mean(all_predictions)
+                    if mean is not None and std is not None:
+                        predictions_zeros = (np.mean(all_predictions) * std) + mean
+                    else:
+                        predictions_zeros = np.mean(all_predictions)
                     difference = np.mean(predictions_ones - predictions_zeros)
                     differences.append(difference)
             else:
@@ -55,7 +62,15 @@ class Model_Agnostic_Measures():
                     X_high = X_.copy()
                     X_high[:, group] += np.std(X_high[:, group])
                     predictions_high = self.predict(X_high)
+                    if mean is not None and std is not None:
+                        predictions_high = (predictions_high * std) + mean
+                    else:
+                        predictions_high = predictions_high
                     predictions = self.predict(X_)
+                    if mean is not None and std is not None:
+                        predictions = (predictions * std) + mean
+                    else:
+                        predictions = predictions                    
                     difference = np.mean((predictions_high - predictions) / np.std(X_[:, group]))
                     differences.append(difference)
                 else:
@@ -65,6 +80,12 @@ class Model_Agnostic_Measures():
                     X_zeros[:, group] = 0
                     predictions_ones = self.predict(X_ones)
                     predictions_zeros = self.predict(X_zeros)
+                    if mean is not None and std is not None:
+                        predictions_ones = (predictions_ones * std) + mean
+                        predictions_zeros = (predictions_zeros * std) + mean
+                    else:
+                        predictions_ones = predictions_ones
+                        predictions_zeros = predictions_zeros
                     difference = np.mean(predictions_ones - predictions_zeros)
                     differences.append(difference)
         differences = np.array(differences)
@@ -203,7 +224,6 @@ class Regression_Tree(Model_Agnostic_Measures):
     
     def fit(self, X, y):
         self.sse_decreases = np.zeros((X.shape[1]))
-        self.sum_of_changes = np.zeros((X.shape[1]))
         self.total_count = len(y)
         if self.hessian is None:
             self.hessian = np.ones(y.shape)
@@ -292,12 +312,11 @@ class Classification_Tree(Model_Agnostic_Measures):
                 best_midpoint = choice[1]
         left_mask = X[:, best_predictor] <= best_midpoint
         right_mask = ~left_mask
-        self.impurity_decreases[best_predictor] += initial_impurity - best_impurity
+        self.impurity_decreases[best_predictor] += (len(y) / self.total_count) * (initial_impurity - best_impurity)
         return best_predictor, best_midpoint, True
     
     def fit(self, X, y):
         self.impurity_decreases = np.zeros((X.shape[1]))
-        self.sum_of_changes = np.zeros((X.shape[1]))
         self.total_count = len(y)
         self.features = X.shape[1]
         self.root = self.grow_tree(X, y)
@@ -362,10 +381,6 @@ class Regression_Random_Forest(Model_Agnostic_Measures):
     def feature_importances(self):
         feature_importances = np.column_stack([tree.feature_importances() for tree in self.trees])
         return np.mean(feature_importances, axis=1)
-
-    def direction_of_change(self):
-        direction_of_change = np.column_stack([tree.direction_of_change() for tree in self.trees])
-        return np.mean(direction_of_change, axis=1)
 
     def permutation_importances(self, X, y, groups):
         permutation_importances = np.column_stack([tree.permutation_importances(X, y, groups) for tree in self.trees])
@@ -435,10 +450,6 @@ class Regression_Gradient_Boosting(Model_Agnostic_Measures):
         sse_decrease_per_feature = np.sum(sse_decreases, axis=1)
         return sse_decrease_per_feature / np.sum(sse_decrease_per_feature)
 
-    def direction_of_change(self):
-        direction_of_change = np.column_stack([tree.direction_of_change() for tree in self.trees])
-        return np.mean(direction_of_change, axis=1)
-
     def permutation_importances(self, X, y, groups):
         current_prediction = np.full(shape=y.shape, fill_value=self.initial_prediction)
         permutation_importances = []
@@ -481,10 +492,6 @@ class Classification_Gradient_Boosting(Model_Agnostic_Measures):
         sse_decrease_per_feature = np.sum(sse_decreases, axis=1)
         return sse_decrease_per_feature / np.sum(sse_decrease_per_feature)
 
-    def direction_of_change(self):
-        direction_of_change = np.column_stack([tree.direction_of_change() for tree in self.trees])
-        return np.mean(direction_of_change, axis=1)
-
     def permutation_importances(self, X, y, groups):
         current_prediction = np.full(shape=y.shape, fill_value=self.initial_prediction)
         permutation_importances = []
@@ -526,7 +533,7 @@ class Layer_Regression():
             self.activation = np.where(self.linear > 0, self.linear, 0)
 
 class Regression_Neural_Network(Model_Agnostic_Measures):
-    def __init__(self, hidden_layer_number, hidden_size, epochs=10000, weight_decay=0, learning_rate=0.001):
+    def __init__(self, hidden_layer_number, hidden_size, epochs=1000, weight_decay=0, learning_rate=0.001):
         self.hidden_layer_number = hidden_layer_number
         self.hidden_size = hidden_size
         self.layers = []
@@ -568,14 +575,14 @@ class Regression_Neural_Network(Model_Agnostic_Measures):
 
             y_hat = self.layers[0].activation
             n = len(y_)
-            previous_bias_gradient_uncollapsed = -2 * (y_ - y_hat) / n
+            next_bias_gradient_uncollapsed = -2 * (y_ - y_hat) / n
 
             for layer in self.layers:
-                layer.bias_gradient = np.sum(previous_bias_gradient_uncollapsed, axis=0, keepdims=True)
-                layer.weight_gradient = layer.input.T @ previous_bias_gradient_uncollapsed
+                layer.bias_gradient = np.sum(next_bias_gradient_uncollapsed, axis=0, keepdims=True)
+                layer.weight_gradient = layer.input.T @ next_bias_gradient_uncollapsed
 
                 if layer.previous is not None:
-                    previous_bias_gradient_uncollapsed = (previous_bias_gradient_uncollapsed @ layer.weight.T) * (layer.previous.linear > 0)
+                    next_bias_gradient_uncollapsed = (next_bias_gradient_uncollapsed @ layer.weight.T) * (layer.previous.linear > 0)
 
                 layer.first_moment_weight = self.beta_1 * layer.first_moment_weight + (1 - self.beta_1) * layer.weight_gradient
                 layer.first_moment_bias = self.beta_1 * layer.first_moment_bias + (1 - self.beta_1) * layer.bias_gradient
@@ -602,30 +609,9 @@ class Regression_Neural_Network(Model_Agnostic_Measures):
         y_hat = previous_layer.activation.reshape(-1).copy()
         return y_hat
 
-    def permutation_importances(self, X, y, groups):
-        predictions_full = self.predict(X)
-        rmse_full = np.sqrt(np.mean((y - predictions_full)**2))
-        permutation_importances = []
-        for group in groups:
-            group_rmse_increase = []
-            for i in range(0, 10):
-                X_ = X.copy()
-                permutated_rows = rng.permutation(len(X_))
-                X_[:, group] = X[permutated_rows][:, group]
-                predictions = self.predict(X_)
-                rmse = np.sqrt(np.mean((y - predictions)**2))
-                rmse_increase = rmse - rmse_full
-                group_rmse_increase.append(rmse_increase)
-            for j in range(0, len(group)):
-                permutation_importances.append(np.mean(group_rmse_increase))
-        permutation_importances = np.array(permutation_importances)
-        permutation_importances = np.where(permutation_importances > 0, permutation_importances, 0)
-        permutation_importances = permutation_importances / np.sum(permutation_importances)
-        return permutation_importances
-
 class Layer_Classification():
     def __init__(self, input_size, hidden_size, input):
-        self.weight = np.random.randn(input_size, hidden_size) * np.sqrt(2 / input_size)
+        self.weight = np.random.randn(input_size, hidden_size) * np.sqrt(1 / input_size)
         self.bias = np.zeros((1, hidden_size))
         self.weight_gradient = np.array([])
         self.bias_gradient = np.array([])
@@ -645,7 +631,7 @@ class Layer_Classification():
         self.activation = 1 / (1 + np.exp(-self.linear))
 
 class Classification_Neural_Network(Model_Agnostic_Measures):
-    def __init__(self, hidden_layer_number, hidden_size, epochs=10000, weight_decay=0, learning_rate=0.001):
+    def __init__(self, hidden_layer_number, hidden_size, epochs=1000, weight_decay=0, learning_rate=0.001):
         self.hidden_layer_number = hidden_layer_number
         self.hidden_size = hidden_size
         self.layers = []
@@ -687,14 +673,15 @@ class Classification_Neural_Network(Model_Agnostic_Measures):
 
             y_hat = self.layers[0].activation
             n = len(y_)
-            previous_bias_gradient_uncollapsed = -2 * (y_ - y_hat) / n
+            next_bias_gradient_uncollapsed = (y_hat - y_) / n
 
             for layer in self.layers:
-                layer.bias_gradient = np.sum(previous_bias_gradient_uncollapsed, axis=0, keepdims=True)
-                layer.weight_gradient = layer.input.T @ previous_bias_gradient_uncollapsed
+                layer.bias_gradient = np.sum(next_bias_gradient_uncollapsed, axis=0, keepdims=True)
+                layer.weight_gradient = layer.input.T @ next_bias_gradient_uncollapsed
 
                 if layer.previous is not None:
-                    previous_bias_gradient_uncollapsed = (previous_bias_gradient_uncollapsed @ layer.weight.T) * (layer.previous.linear > 0)
+                    sigmoid_derivative = 1 / (1 + np.exp(-layer.previous.linear))
+                    next_bias_gradient_uncollapsed = (next_bias_gradient_uncollapsed @ layer.weight.T) * sigmoid_derivative * (1 - sigmoid_derivative)
 
                 layer.first_moment_weight = self.beta_1 * layer.first_moment_weight + (1 - self.beta_1) * layer.weight_gradient
                 layer.first_moment_bias = self.beta_1 * layer.first_moment_bias + (1 - self.beta_1) * layer.bias_gradient
