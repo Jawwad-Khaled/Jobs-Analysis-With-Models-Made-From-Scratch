@@ -20,7 +20,7 @@ class Model_Agnostic_Measures():
                 permutation_importances.append(np.mean(group_rmse_increase))
         permutation_importances = np.array(permutation_importances)
         permutation_importances = np.where(permutation_importances > 0, permutation_importances, 0)
-        permutation_importances = permutation_importances / np.sum(permutation_importances)
+        permutation_importances = permutation_importances / np.sum(permutation_importances + 1e-8)
         return permutation_importances
 
     def marginal_importance(self, X, y, groups, continuous_predictors, mean=None, std=None):
