@@ -136,7 +136,7 @@ class Logistic_Regression(Model_Agnostic_Measures):
         self.bias_vector =  np.full(shape=y_.shape[0], fill_value=self.bias).reshape(-1, 1)
         for i in range(0, self.max_iterations):
             previous_parameters = self.parameters.copy()
-            p = 1/(1+np.exp(-(X_ @ self.parameters + self.bias_vector)))
+            p = 1 / (1 + np.exp(-(X_ @ self.parameters + self.bias_vector)))
             grad_w = -(np.transpose(X_) @ (y_ - p) -2 * X_.shape[0] * self.alpha * self.parameters) * (1/X_.shape[0])
             grad_b = -(np.mean(y_ - p))
             self.first_moment_r = self.beta_1 * self.first_moment_r + (1-self.beta_1) * grad_w 
@@ -153,7 +153,7 @@ class Logistic_Regression(Model_Agnostic_Measures):
 
     def predict(self, X):
         bias_vector_prediction = np.full(shape=X.shape[0], fill_value=self.bias).reshape(-1, 1)
-        y_hat = 1/(1+np.exp(-(X @ self.parameters + bias_vector_prediction)))
+        y_hat = 1 / (1 + np.exp(-(X @ self.parameters + bias_vector_prediction)))
         y_hat = y_hat.reshape(-1)
         return y_hat
 
