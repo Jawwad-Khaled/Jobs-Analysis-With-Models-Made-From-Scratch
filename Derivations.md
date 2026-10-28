@@ -102,7 +102,7 @@ The partial derivative with respect to $\beta_0$ is the negative of a dot produc
 
 I then update the parameters using the Adam optimizer because standard gradient descent is painfully slow. Especially when you need to also do hyperparameter tuning which you do need to do here because $\alpha$ is a hyperparameter.
 
-## Neural Network
+## Neural Networks
 
 First, I will consider a simple neural network with two hidden layers, p inputs, and with a hidden size h in each hidden layer. The hidden size will be the same for each hidden layer so that hyperparameter tuning can be done more easily. There will be 3 activation vectors which are written below.
 
@@ -116,7 +116,7 @@ A_2=A(A_1W_2+B_2)
 A_3=A(A_2W_3+B_3)
 ```
 
-First, I will write down the sizes for each matrix. Note that $A_3$ is the same as the predicted values $\hat{y}$. Every row for the bias vectors are identical so there only really is one unique row. Technically, you could just write all of the shapes of the bias vectors with 1 row and then the broadcasting would take care of the rest.
+First, I will write down the sizes for each matrix. Note that $A_3$ is the same as the predicted values $\hat{y}$. Every row for the bias vectors are identical so there only really is one unique row. Technically, you could just write all of the shapes of the bias vectors with 1 row and then broadcasting would take care of the rest.
 - $X$ -> n x p | $W_1$ -> p x h | $B_1$ -> n x h
 - $A_1$ -> n x h | $W_2$ -> h x h | $B_2$ -> n x h
 - $A_2$ -> n x h | $W_3$ -> h x 1 | $B_3$ -> n x 1
@@ -177,3 +177,19 @@ To get to the next bias gradient, you multiply the previous bias gradient by the
 With this, you have all of the gradients calculated. Just like for logistic regression, I update the parameters using the Adam optimizer. Using gradient descent here would really suck because a neural network takes so much longer to train than logistic regression.
 
 Implementing the neural network from scratch has caused me quite some struggles so I'll mention them here. First of all, broadcasting happens automatically but you unbroadcasting for gradient calculations does not. So my bias vectors and their gradients ended up being different shapes and I had to figure out how to fix that. I originally wanted to go through 4 values of each of the 4 hyperparameters instead of 3 but I ran into a random memory error like 10 hours in. I didn't really want to deal with that so I just reduced it to the number of values for each hyperparameter to 3. It took a lot less time to train as well. I still don't fully understand the chain rule with matrix derivatives which is why I relied on shape matching which I got from the Stanford CS229 lectures. But I do plan on going through the MIT 18.S096 matrix calculus course on MIT OCW in order to understand it better.
+
+## Decision Trees
+
+For trees, this is the algorithm I carried. First, I looped through each feature and calculated the midpoints. Then I looped over each midpoint. The prediction for the left of the midpoint was the mean of all of the points on the left and the same for the right of the midpoint. I calculated the sum of squared errors for regression and the Gini impurity for classification. This happened for all predictors and for all midpoints within each predictor. Then, the best predictor and midpoint was chosen which is the one with the lowest sum of squared errors or impurity. 
+
+There were some safeguards. If there array y was completely empty, then I would return that there was no valid split. If a predictor only had one unique value which also means it only has one midpoint, then that predictor is skipped. If no sum of squared errors or impurities are found, the predictor is skipped. If the list containing the best midpoint and best sum of squared error or impurity for each predictor turned out empty, then I would return that there was no valid split. Also, if one side of the midpoint was empty, that midpoint would be skipped. I found out most of these through debugging.
+
+The best predictors and midpoints are then used to recursively grow the trees. All the data points on the left side of a midpoint are then directed to one side and the same for the right. Then a new tree is grown from the newly separated data points unless there are two few data points, the tree got too big, or every data point has the same value. Then, a leaf is made where the mean of all of the data points is the prediction.
+
+To get predictions, I iterated over each row of the data matrix as each row represents one data point. I start at the root and and the value of one of the features of each row is checked against the node's feature and threshold. If the value is less than the threshold, the row gets directed to the left branch and if its value is greater than the threshold, the row gets directed to the right branch. If a leaf is reached, the leaf's value is returned and added to the array of predictions.
+
+## Decision Tree Ensembles
+
+Random forests were pretty straightforward. Bootstrapped datasets were used and I added a features variable that is basically just a list of a few randomly chosen features that each tree will consider in order to decorrelate the trees. The features are reassigned every time a new split is required. The number of random features that each split sees is a hyperparameter I tuned with cross validation. Regression random forests used regression trees while classification random forests used classification trees.
+
+Regression gradient boosting wasn't too complicated either. First, every data point gets assigned a prediction equal to the means. The residuals are calculated which can either be negative or positive. A tree is then fit to try to minimize these residuals. The predictions are multiplied by a learning rate to make the trees slow leaners and then more trees are added to fit the previous trees residuals. The number of trees is a hyperparameter I tuned with cross validation.
