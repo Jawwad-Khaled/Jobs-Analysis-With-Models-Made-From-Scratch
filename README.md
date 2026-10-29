@@ -16,7 +16,7 @@ I have run 3 two sample Welch's  t-tests. All of them had p-values of 0 to 6 dec
 
 I have used both regression and classification here. For regression, the target variable was the yearly salary while for classification, it was whether the yearly salary was above the median. 
 
-For regression, the models I used were linear regression with ridge regularization, regression trees, random forests with regression trees, gradient boosting with regression trees, and a neural network that uses mean squared error loss and the RELU activation function. The performance metrics used were RMSE and R squared.
+For regression, the models I used were linear regression with ridge regularization, regression trees, random forests with regression trees, gradient boosting with regression trees, and a neural network that uses mean squared error loss and the ReLU activation function. The performance metrics used were RMSE and R squared.
 
 For classification, the models I used were logistic regression with ridge regularization, classification trees, random forests with classification trees, gradient boosting with regression trees, and a neural network that uses binary cross entropy loss and the sigmoid activation function. The performance metric used was accuracy.
 
