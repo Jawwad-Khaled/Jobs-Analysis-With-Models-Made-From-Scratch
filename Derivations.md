@@ -27,13 +27,13 @@ Now, solve for $\beta_0$.
 Since, we now have an equation for $\beta_0$, we can write the loss function for linear regression with ridge regularization.
 
 ```math
-L=\sum^n_{i=1}(y-(\beta_0+\beta_1x_1+\cdots+\beta_px_p))^2+\alpha\sum^p_{i=1}{\beta_j}^2
+L=\sum^n_{i=1}(y-(\beta_0+\beta_1x_1+\cdots+\beta_px_p))^2+\alpha\sum^p_{j=1}{\beta_j}^2
 ```
 
 The reason we solved for $\beta_0$ is in order to eliminate $\beta_0$ from the loss function with ridge regularization. Ridge regularization causes the magnitude of the parameters to shrink towards zero but we don't want the intercept to shrink so we eliminate it first.
 
 ```math
-L=\sum^n_{i=1}((y-\bar{y})-(\beta_1(x_1-\bar{x_1})+\cdots+\beta_p(x_p-\bar{x_p})))^2+\alpha\sum^p_{i=1}{\beta_j}^2
+L=\sum^n_{i=1}((y-\bar{y})-(\beta_1(x_1-\bar{x_1})+\cdots+\beta_p(x_p-\bar{x_p})))^2+\alpha\sum^p_{j=1}{\beta_j}^2
 ```
 
 Now, let's differentiate the loss with respect to an arbitrary parameter which will be the jth one and see if the result came from some sort of matrix multiplication. Also, for the second term, the sum disappears because all of the parameters except for $\beta_j$ are constants with respect to $\beta_j$.
@@ -77,7 +77,7 @@ Here, we have n data points and p predictors not including the intercept. First 
 z = \beta_0+\beta_1x_1+\cdots+\beta_px_p
 ```
 ```math
-L=-\frac{1}{n}\sum^n_{i=1}y\log(\sigma(z))+(1-y)\log(1-\sigma(z))+\alpha\sum^p_{i=1}{\beta_j}^2
+L=-\frac{1}{n}\sum^n_{i=1}y\log(\sigma(z))+(1-y)\log(1-\sigma(z))+\alpha\sum^p_{j=1}{\beta_j}^2
 ```
 
 Again, we want to leave $\beta_0$ unpenalized but we can't do the same thing we did for linear regression as we cannot directly solve for $\beta_0$ here. So we'll just treat $\beta_0$ separately. We'll find the gradient of the $\beta$ vector which does not include $\beta_0$ and also the gradient for $\beta_0$ separately.
@@ -170,26 +170,101 @@ Now, we'll calculate the partial derivatives for $B_1$ and $W_1$
 \frac{\partial{L}}{\partial{W_1}}=X^T\left(\left(\left(\left(\left(\frac{\partial{L}}{\partial{A_3}}\odot A^\prime(A_2W_3+B_3)\right){W_3}^T\right)\odot A^\prime(A_1W_2+B_2)\right){W_2}^T\right)\odot A^\prime(XW_1+B_1)\right)
 ```
 
-Is there some sort of pattern that can be seen that let's us expand this to any number of hidden layers? There is which is why I was able to code any number of hidden layers. First, you take the partial derivative of the gradient with respect to the bias closest to the loss. For the gradient with respect to the weight matrix closest to the loss, you multiply the bias gradient on the left by the transpose of the activation matrix you multiplied that weight matrix with.
+Is there some sort of pattern that can be seen that lets us expand this to any number of hidden layers? There is which is why I was able to code any number of hidden layers. First, you take the partial derivative of the gradient with respect to the bias closest to the loss. For the gradient with respect to the weight matrix closest to the loss, you multiply the bias gradient on the left by the transpose of the activation matrix you multiplied that weight matrix with.
 
 To get to the next bias gradient, you multiply the previous bias gradient by the transpose of the previous weight matrix on the right and then with the entire matrix product so far, multiply elementwise by the derivative of the activation which takes in the current bias and weight matrix along with the activation matrix multiplying that weight matrix. Again, to get the next weight gradient, you multiply on the left by the transpose of the activation matrix you multiplied the next weight with.
 
 With this, you have all of the gradients calculated. Just like for logistic regression, I update the parameters using the Adam optimizer. Using gradient descent here would really suck because a neural network takes so much longer to train than logistic regression.
 
-Implementing the neural network from scratch has caused me quite some struggles so I'll mention them here. First of all, broadcasting happens automatically but you unbroadcasting for gradient calculations does not. So my bias vectors and their gradients ended up being different shapes and I had to figure out how to fix that. I originally wanted to go through 4 values of each of the 4 hyperparameters instead of 3 but I ran into a random memory error like 10 hours in. I didn't really want to deal with that so I just reduced it to the number of values for each hyperparameter to 3. It took a lot less time to train as well. I still don't fully understand the chain rule with matrix derivatives which is why I relied on shape matching which I got from the Stanford CS229 lectures. But I do plan on going through the MIT 18.S096 matrix calculus course on MIT OCW in order to understand it better.
+Implementing the neural network from scratch has caused me quite some struggles so I'll mention them here. First of all, broadcasting happens automatically but unbroadcasting for gradient calculations does not. So my bias vectors and their gradients ended up being different shapes and I had to figure out how to fix that. I originally wanted to go through 4 values of each of the 4 hyperparameters instead of 3 but I ran into a random memory error like 10 hours in. I didn't really want to deal with that so I just reduced it to the number of values for each hyperparameter to 3. It took a lot less time to train as well. I still don't fully understand the chain rule with matrix derivatives which is why I relied on shape matching which I got from the Stanford CS229 lectures. But I do plan on going through the MIT 18.S096 matrix calculus course on MIT OCW in order to understand it better.
+
+It also seems like the initialization of weights and biases matters much more for neural networks than for other models. It's probably because neural networks are nonconvex optimization problems.
 
 ## Decision Trees
 
-For trees, this is the algorithm I carried. First, I looped through each feature and calculated the midpoints. Then I looped over each midpoint. The prediction for the left of the midpoint was the mean of all of the points on the left and the same for the right of the midpoint. I calculated the sum of squared errors for regression and the Gini impurity for classification. This happened for all predictors and for all midpoints within each predictor. Then, the best predictor and midpoint was chosen which is the one with the lowest sum of squared errors or impurity. 
+For trees, this is the algorithm I carried out. First, I looped through each feature and calculated the midpoints. Then I looped over each midpoint. The prediction for the left of the midpoint was the mean of all of the points on the left and the same for the right of the midpoint. I calculated the sum of squared errors for regression and the Gini impurity for classification. This happened for all predictors and for all midpoints within each predictor. Then, the best predictor and midpoint was chosen which is the one with the lowest sum of squared errors or impurity. 
 
-There were some safeguards. If there array y was completely empty, then I would return that there was no valid split. If a predictor only had one unique value which also means it only has one midpoint, then that predictor is skipped. If no sum of squared errors or impurities are found, the predictor is skipped. If the list containing the best midpoint and best sum of squared error or impurity for each predictor turned out empty, then I would return that there was no valid split. Also, if one side of the midpoint was empty, that midpoint would be skipped. I found out most of these through debugging.
+There were some safeguards. If the array y was completely empty, then I would return that there was no valid split. If a predictor only had one unique value which also means it only has one midpoint, then that predictor is skipped. If no sum of squared errors or impurities are found, the predictor is skipped. If the list containing the best midpoint and best sum of squared error or impurity for each predictor turned out empty, then I would return that there was no valid split. Also, if one side of the midpoint was empty, that midpoint would be skipped. I found out most of these through debugging.
 
-The best predictors and midpoints are then used to recursively grow the trees. All the data points on the left side of a midpoint are then directed to one side and the same for the right. Then a new tree is grown from the newly separated data points unless there are two few data points, the tree got too big, or every data point has the same value. Then, a leaf is made where the mean of all of the data points is the prediction.
+The best predictors and midpoints are then used to recursively grow the trees. All the data points on the left side of a midpoint are then directed to one side and the same for the right. Then a new tree is grown from the newly separated data points unless there are too few data points, the tree got too big, or every data point has the same value. Then, a leaf is made where the mean of all of the data points is the prediction.
 
-To get predictions, I iterated over each row of the data matrix as each row represents one data point. I start at the root and and the value of one of the features of each row is checked against the node's feature and threshold. If the value is less than the threshold, the row gets directed to the left branch and if its value is greater than the threshold, the row gets directed to the right branch. If a leaf is reached, the leaf's value is returned and added to the array of predictions.
+To get predictions, I iterated over each row of the data matrix as each row represents one data point. I start at the root and and the value of one of the features of each row is checked against the node's feature and threshold. If the value is less than the threshold, the row gets directed to the left branch and if its value is greater than the threshold, the row gets directed to the right branch. If the value is equal to the threshold, you get to chose which branch it goes to. If a leaf is reached, the leaf's value is returned and added to the array of predictions.
 
 ## Decision Tree Ensembles
 
 Random forests were pretty straightforward. Bootstrapped datasets were used and I added a features variable that is basically just a list of a few randomly chosen features that each tree will consider in order to decorrelate the trees. The features are reassigned every time a new split is required. The number of random features that each split sees is a hyperparameter I tuned with cross validation. Regression random forests used regression trees while classification random forests used classification trees.
 
-Regression gradient boosting wasn't too complicated either. First, every data point gets assigned a prediction equal to the means. The residuals are calculated which can either be negative or positive. A tree is then fit to try to minimize these residuals. The predictions are multiplied by a learning rate to make the trees slow leaners and then more trees are added to fit the previous trees residuals. The number of trees is a hyperparameter I tuned with cross validation.
+Regression gradient boosting wasn't too complicated either. First, every data point gets assigned a prediction equal to the mean. The residuals are calculated which can either be negative or positive. A tree is then fit to predict these residuals. The predictions are multiplied by a learning rate to make the trees slow learners and then more trees are added to fit the previous trees residuals. The number of trees is a hyperparameter I tuned with cross validation.
+
+Classification gradient boosting was much more complicated to implement though. First, we define a global loss function which is binary cross entropy loss. Instead of writing it in terms of the probabilities, we will write it in terms of the log odds denoted with a z.
+
+```math
+L=-\sum^n_{i=1}y\log(p)+(1-y)\log(1-p)
+```
+```math
+L=\sum^n_{i=1}\log(1+e^z)-yz
+```
+
+So here, z is just the log odds of each data point. There are no parameters as trees are nonparametric. So we need to find a way to calculate the log odds for each data point. At first, every data point will start with the same log odds. We need to figure out which value of z every data point can start with which will minimize the loss. So we differentiate the loss with respect to z and solve for the z that minimizes the loss. We can write it in terms of probabilities and also log odds.
+
+```math
+\frac{\partial{L}}{\partial{z}}=\sum^n_{i=1}\frac{e^z}{1+e^z}-y
+```
+```math
+\frac{\partial{L}}{\partial{z}}=\sum^n_{i=1}p-y
+```
+
+It's much easier to solve for p so I'll just do that.
+
+```math
+p=\bar{y}
+```
+
+Here, we can see that p is just the mean of the target which is the number of data points where y=1 divided by the total number of data points. To find the initial value of the log odds, we put in the initial predicted probability into the log odds equation.
+
+```math
+z=\log\left(\frac{\bar{y}}{1-\bar{y}}\right)
+```
+
+This is also the log of the number of data points where y=1 divided by the number of data points where y=0. What if we did gradient descent to try and figure out how to nudge the log odds of each data point in order to minimize the loss? To do that, we take the negative of the gradient of the loss. These are also called the pseudo residuals which will be noted with an r. The residuals we got from regression gradient boosting also come from this same process except that you use squared error loss as the global loss function.
+
+```math
+r=y-p
+```
+
+This is where we use regression trees. We fit a regression tree in order to predict these pseudo residuals. However, we don't really want to just add these on to the predicted probabilities. The probabilities might become less than 0 or greater than 1 so instead, let's convert them to log odds. But these are pseudo residuals and not probabilities so it isn't like we can just use the formula. One thing we do want to do is decrease the loss. So maybe there is a value $\gamma$ that we can add onto z that minimizes the loss. The new loss function would then looks like this.
+
+```math
+L=\sum^n_{i=1}\log(1+e^{z+\gamma})-y(z+\gamma)
+```
+
+The next step is to then find the value of $\gamma$ that minimizes the loss. Which you could do by differentiating with respect to $\gamma$ and then solving for $\gamma$ but that doesn't have a closed form solution. Instead, we'll use the Taylor Series for the loss centered at z.
+
+```math
+L\approx\sum^n_{i=1}L(z)+L'(z)\gamma+\frac{1}{2}L''(z)\gamma^2
+```
+
+Now, we differentiate L with respect to $\gamma$, set the derivative equal to 0 and then solve for $\gamma$.
+
+```math
+\frac{\partial{L}}{\partial\gamma}=L'(z)+L''(z)\gamma=0
+```
+```math
+\gamma=-\frac{L'(z)}{L''(z)}
+```
+
+Here, $-L'(z)$ is just the pseudo residuals. If we differentiate $L'(z)$ with respect to z, the y is a constant and what we have is z as an input to the sigmoid function. We know the output of the sigmoid function with z as an input is just p and we know the derivative of the sigmoid function in terms of the sigmoid function as well which means we can write it in terms of p.
+
+```math
+\gamma=\frac{y-p}{p(1-p)}
+```
+
+Here, we sum up to m instead of n because this gamma doesn't apply to all predictions. It only applies to the predictions in a specific leaf. This also means that loss and its derivatives in the Taylor Series are also only for each leaf. Every leaf will have a different $\gamma$ value. Then, we add $\gamma$ onto z but if we just do that, we would overfit. So instead, we multiply $\gamma$ by a learning rate which in classification gradient boosting is called $\nu$ instead of $\alpha$ for some reason and then we add onto z. Then, we calculate probabilities again using z, calculate residuals, fit the residuals onto a new tree and then do this process again and again. The number of trees is a hyperparameter tuned using cross validation.
+
+Now, z is not the same value for every data point. That means for the loss function, we will need to differentiate with respect to each z. So instead of the gradient being a scalar, it becomes a vector with n entries for each data point. And the negative of that is the vector of pseudo residuals.
+
+## Model Agnostic Measures
+
+These were created in order to compare models with each other. First, we have permutation importance which checks how the performance metric changes when you scramble the column of one predictor up. If R squared or accuracy goes down a lot or RMSE goes up a lot, you know you have an important predictor. I just realized that I used RMSE for the classification models as well. It isn't ideal but it shouldn't break things too much and I really don't want to train these models for another 20 hours. Now for gradient boosting, I needed to add a safety against division by zero because apparently every feature becomes unimportant when you are predicting residuals. Also, in order for there to not be any impossible rows such as a job posting in both the US and Singapore, mutually exclusive predictors are shuffled together. All of the mutually exclusive predictors get the same permutation importance. For the permutation importances to add up to one, each features permutation importance is divided by the total permutation importance.
+
+I also added marginal importance as permutation importance doesn't tell you whether a predictor increases or decreases the target. For continuous predictors, I add one standard deviation to each entry. Subtract the normal predictions from the predictions with one standard deviation added and then divide by the standard deviation to get the marginal importance. For categorical variables that aren't mutually exclusive with other categorical variables, I made all entries 1 and calculated the predictions, then made all entries 0 and calculated the predictions, and then subtracted the predictions with all entries 0 from the predictions with all entries to get the marginal importance. Now, for mutually exclusive predictors a little more work needs to be done. To calculate the prediction where all entries are 1, we set that predictor to 1 and the rest to zero, and then calculate the prediction. The prediction with all entries equal to zero is a bit more involved because one of the other predictors could be a 1. So, we make all of them one and then average to get the prediction with all entries 0. The marginal importance is the difference between these and then we calculate it for the other mutually exclusive predictors by repeating the process described above.
