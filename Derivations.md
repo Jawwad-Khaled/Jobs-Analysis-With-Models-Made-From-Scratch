@@ -256,7 +256,7 @@ Now, we differentiate L with respect to $\gamma$, set the derivative equal to 0 
 Here, $-L'(z)$ is just the pseudo residuals. If we differentiate $L'(z)$ with respect to z, the y is a constant and what we have is z as an input to the sigmoid function. We know the output of the sigmoid function with z as an input is just p and we know the derivative of the sigmoid function in terms of the sigmoid function as well which means we can write it in terms of p.
 
 ```math
-\gamma=\frac{y-p}{p(1-p)}
+\gamma=\frac{\sum^m_{i=1}y-p}{\sum^m_{i=1}p(1-p)}
 ```
 
 Here, we sum up to m instead of n because this gamma doesn't apply to all predictions. It only applies to the predictions in a specific leaf. This also means that loss and its derivatives in the Taylor Series are also only for each leaf. Every leaf will have a different $\gamma$ value. Then, we add $\gamma$ onto z but if we just do that, we would overfit. So instead, we multiply $\gamma$ by a learning rate which in classification gradient boosting is called $\nu$ instead of $\alpha$ for some reason and then we add onto z. Then, we calculate probabilities again using z, calculate residuals, fit the residuals onto a new tree and then do this process again and again. The number of trees is a hyperparameter tuned using cross validation.
